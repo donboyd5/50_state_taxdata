@@ -1,0 +1,66 @@
+
+
+# create constraint coefficients
+# to be on the safe side, make a long sparse file and assign a ccnum to each constraints
+long <- pufbase_state %>%
+  pivot_longer(cols=-c(i, RECID, stabbr, AGI_STUB, weight_state), names_to="puf_link", values_to = "value") %>%
+  filter(value!=0)
+ht(long)
+count(long, AGI_STUB)
+count(long, puf_link)
+
+# link it to constraints as we will need 2 constraints for most variables -- # of nonzeros, and amount
+long2 <- long %>% 
+  full_join(targets_state, by=c("stabbr", "AGI_STUB", "puf_link"))
+ht(long2)
+
+# we won't have any returns in the puf where taxbc is nonzero and the AGI_STUB==1 (AGI < $1)
+# even though the historical table 2 data have about 910 such returns, with total taxbc of ~$31m
+# that target is nonfeasible and so we will make note of it and drop it
+
+targets_state_nonfeas <- long2 %>% filter(is.na(RECID)) %>% select(-RECID, -value)
+
+targets_state_feas <- targets_state %>%
+  filter(!target_num %in% targets_state_nonfeas$target_num) %>%
+  arrange(AGI_STUB, target_num) %>%
+  # create a sequence within AGI_STUB
+  arrange(AGI_STUB, constraint_name) %>%
+  group_by(AGI_STUB) %>%
+  # j is the constraint number WITHIN THIS AGI_STUB - it may not be the same constraint name from one stub to another
+  mutate(j=row_number()) %>%
+  ungroup
+targets_state_feas %>% group_by(AGI_STUB) %>% summarise(ngroups=n(), topgroup=max(j)) # should be the same
+# this is what we will use for targeting and for constraint coefficients
+
+
+# now we can create a data frame of nonzero constraint coefficients
+count(long2, constraint_type)
+nzcc <- targets_state_feas %>%
+  left_join(long2 %>% select(-c(puf_link, year, stabbr, AGI_STUB, table_desc, target, 
+                                constraint_name, constraint_type, constraint_base_name)), by="target_num") %>%
+  mutate(nzcc=case_when(constraint_type=="amount" ~ value * weight_state,
+                        constraint_type=="n_nonzero" ~ weight_state,
+                        constraint_type=="n_exempt" ~ value * weight_state,
+                        constraint_type=="n_returns" ~ weight_state,
+                        TRUE ~ NA_real_))
+
+# Old target format -- file targets_state.csv
+constraint_name,constraint_type,constraint_base_name,puf_link,year,stabbr,AGI_STUB,table_desc,target,target_num
+A00100,amount,00100,c00100,2017,NY,1,Adjusted gross income (AGI),-23906390000,19876
+A00200,amount,00200,E00200,2017,NY,1,Salaries and wages amount,1221150000,19877
+A00300,amount,00300,E00300,2017,NY,1,Taxable interest amount,822159000,19878
+...
+MARS1,n_returns,NA,MARS1,2017,NY,1,Number of single returns,72990,19900
+MARS2,n_returns,NA,MARS2,2017,NY,1,Number of joint returns,29780,19901
+MARS3,n_returns,NA,MARS3,2017,NY,1,Number of married-separate returns,4330,19902
+MARS4,n_returns,NA,MARS4,2017,NY,1,Number of head of household returns,5810,19903
+...
+N00100,n_nonzero,00100,c00100,2017,NY,1,Number of returns with adjusted gross income (AGI),89360,19904
+N00200,n_nonzero,00200,E00200,2017,NY,1,Number of returns with salaries and wages,28950,19905
+N00300,n_nonzero,00300,E00300,2017,NY,1,Number of returns with taxable interest,43320,19906
+N00600,n_nonzero,00600,E00600,2017,NY,1,Number of returns with ordinary dividends,31570,19907
+...
+N2,n_exempt,NA,XTOT,2017,NY,1,Number of exemptions,165350,19927
+...
+
+

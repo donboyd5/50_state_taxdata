@@ -1,0 +1,150 @@
+
+# ipopt list https://list.coin-or.org/pipermail/ipopt/
+
+# misc notes re OSX
+https://github.com/casadi/casadi/wiki/Obtaining-HSL
+https://list.coin-or.org/pipermail/ipopt/2013-August/003486.html
+https://stackoverflow.com/questions/35165373/compiling-ipopt-for-ipoptr-on-mac
+
+# Good options lists:
+#   https://www.coin-or.org/Bonmin/option_pages/options_list_ipopt.html
+#   https://www.gams.com/latest/docs/S_IPOPT.html
+
+# https://rwalk.xyz/sparse-quadratic-programming-with-ipoptr/
+
+HSL:
+http://www.hsl.rl.ac.uk/catalogue/hsl_ma86.html
+
+
+`ipoptr` does not require a Hessian matrix of 2nd derivatives but in this problem it generally works best with one.
+
+When using the Hessian we have to provide two things:
+
+* A function that computes the Hessian at point x. `ipoptr` calls this function `eval_h` internally and I call our vesion `eval_h_xtop` to reflect our objective function, which raises x to a power p. The function returns a vector of nonzero values in the Hessian matrix.
+
+* A list that defines the Hessian structure - how the vector returned from the Hessian function relates to the cells of the Hessian matrix. 
+
+    + In our case we only need the diagonal of the Hessian, and so the first element has the value 1, the second list element has the value 2, the third list element has the value 3, and so on. There is one element for each variable (each element of x). If x has length 5,000, then the list will have 5,000 elements and that 5,000th element will be 5000.
+    
+    + The helper function `hess_structure` below creates such a list. The example below shows the output of the function for a problem with 5 variables. CAUTION: This function is specific to our problem. Other problems (other than weighting microdata files) might use off-diagonal elements of the Hessian.
+
+Calculating derivatives properly is crucial or IPOPT will not produce good results. Because my calculus is a little rusty, I check my derivative calculations against a website that can do this http://www.derivative-calculator.net/. IPOPT also has a built-in derivative checker that can be turned on with an IPOPT option (passed as an argument to the `ipoptr` options list). It calculates approximate derivatives by finite differences and compares them to the values returned from your derivative functions. It is extremely slow, but useful to use it as a check (limiting the number of iterations to 1 or 2) the first time you use a derivative function or when troubleshooting.
+
+# https://www.coin-or.org/Ipopt/documentation/node40.html # ipopt options
+# derivative checker output:
+# https://coin-or.github.io/Ipopt/SPECIALS.html
+
+A typical output is:
+
+Starting derivative checker.
+
+* grad_f[          2] = -6.5159999999999991e+02    ~ -6.5559997134793468e+02  [ 6.101e-03]
+* jac_g [    4,    4] =  0.0000000000000000e+00    ~  2.2160643690464592e-02  [ 2.216e-02]
+* jac_g [    4,    5] =  1.3798494268463347e+01 v  ~  1.3776333629422766e+01  [ 1.609e-03]
+* jac_g [    6,    7] =  1.4776333636790881e+01 v  ~  1.3776333629422766e+01  [ 7.259e-02]
+
+Derivative checker detected 4 error(s).
+The star ("*") in the first column indicates that this line corresponds to some partial derivative for which the error tolerance was exceeded. Next, we see which partial derivative is concerned in this output line. For example, in the first line, it is the second component of the objective function gradient (or the third, if the C_STYLE numbering is used, i.e., when counting of indices starts with 0 instead of 1). The first floating point number is the value given by the user code, and the second number (after "~") is the finite differences estimation. Finally, the number in square brackets is the relative difference between these two numbers.
+
+For constraints, the first index after jac_g is the index of the constraint, and the second one corresponds to the variable index (again, the choice of the numbering style matters).
+
+Since also the sparsity structure of the constraint Jacobian has to be provided by the user, it can be faulty as well. For this, the "v" after a user-provided derivative value indicates that this component of the Jacobian is part of the user provided sparsity structure. If there is no "v", it means that the user did not include this partial derivative in the list of non-zero elements. In the above output, the partial derivative jac_g[4,4] is non-zero (based on the finite difference approximation), but it is not included in the list of non-zero elements (missing "v"), so that the user probably made a mistake in the sparsity structure. The other two Jacobian entries are provided in the non-zero structure but their values seem to be off.
+
+
+# HSL Performance tips
+http://www.hsl.rl.ac.uk/ipopt/
+Try different scaling options using solver specific settings in ipopt.opt.
+For many problems scaling is not necessary. In particular try "ma57_automatic_scaling no" when using MA57 on small problems.
+See our report On the effects of scaling on the performance of Ipopt for a review of these effects.
+When using HSL_MA86 or HSL_MA97 ensure MeTiS ordering is compiled into Ipopt to maximize parallelism.
+
+
+https://list.coin-or.org/pipermail/ipopt/2012-June/002948.html
+WARNING: Problem in step computation; switching to emergency mode.
+
+The described behavior occurs if the linear system is so ill-conditioned 
+that Ipopt's heuristics to overcome this do not work.  My guess is that 
+the constraints are either very badly scaled, or almost degenerate.  
+Maybe some change in the model might also help.
+
+Andreas Waechter
+
+https://list.coin-or.org/pipermail/ipopt/2010-September/002109.html
+>> I try to solve an optimization problem with Ipopt and I often get the
+>> messages "1 Slack too small, adjusting variable bound" or "WARNING:
+>> Problem in step computation; switching to emergency mode."
+
+The second WARNING message can also appear if there are bad floating point 
+numbers (Nan or Inf) in the matrices, it might be worthwhile to run with
+
+check_derivatives_for_naninf yes
+
+which will tell you if there is a bad number.
+
+The first message is not necessarily bad, but if it appears repeatedly, it 
+probably means that Ipopt is some trouble.
+...
+Andreas
+
+https://list.coin-or.org/pipermail/ipopt/2017-May/004440.html
+On 05/10/2017 05:51 PM, Austin Herrema wrote:
+> Hello all,
+> 
+> I am using IPOPT implemented through OpenMDAO and am having some trouble
+> understanding and controlling the stopping criteria.
+> 
+> Here is what I'm experiencing specifically: Initially, IPOPT is able to
+> find a solution that appears to be much better, although constraints are
+> violated slightly (intuition tells me that adjusting a few parameters would
+> likely bring it into the feasible region). From this stackoverflow
+> discussion
+> <http://stackoverflow.com/questions/36907064/why-does-ipopt-evaluate-objective-function-despite-breaching-constraints>
+> I understand that "linear or nonlinear equality or inequality constraint will
+> not necessarily be satisfied until the solver has finished converging at
+> the final iteration," so I would like to know if I can change tolerances
+> such that the solver will begin to completely satisfy constraints sooner.
+> Currently, nearly all evaluations are in the infeasible regime.
+> 
+> I realize that this approach would result in a less optimal solution, but
+> my function evaluations are quite computationally expensive so I'd like to
+> be able to have some kind of control over exiting earlier but with feasible
+> results. It is not clear to me when looking at IPOPT termination
+> documentation <https://www.coin-or.org/Ipopt/documentation/node42.html> how
+> this might be done. (dual_inf_tol?)
+
+if you set parameter start_with_resto, then Ipopt should first minimize 
+infeasibility until it finds a point which infeasibility is considerably 
+smaller than the starting point (I guess). When this is achieved, it 
+should switch back to the original problem where the original objective 
+function is considered again. What is meant by "considerably smaller" is 
+controlled by the parameter "required_infeasible_reduction"
+https://www.coin-or.org/Ipopt/documentation/node50.html#SECTION0001110040000000000000
+
+Best,
+Stefan
+
+https://kilthub.cmu.edu/articles/Advances_in_Newton-based_Barrier_Methods_for_Nonlinear_Programming/6714626/1
+Nonlinear programming is a very important tool for optimizing many systems in science and engineering. The interior 
+point solver IPOPT has become one of the most popular solvers for NLP because of its high performance. However, certain
+types of problems are still challenging for IPOPT. This dissertation considers three improvements or extensions to IPOPT
+to improve performance on several practical classes of problems. Compared to active set solvers that treat inequalities 
+by identifying active constraints and transforming to equalities, the interior point method is less robust in the presence
+of degenerate constraints. Interior point methods require certain regularity conditions on the constraint set for the 
+solution path to exist. Dependent constraints commonly appear in applications such as chemical process models and violate
+the regularity conditions. The interior point solver IPOPT introduces regularization terms to attempt to correct this, 
+but in some cases the required regularization terms either too large or too small and the solver will fail. To deal with
+ these challenges, we present a new structured regularization algorithm, which is able to numerically delete dependent 
+equalities in the KKT matrix. Numerical experiments on hundreds of modified example problems show the effectiveness of this 
+approach with average reduction of more than 50% of the iterations. In some contexts such as online optimization, very fast
+solutions of an NLP are very important. To improve the performance of IPOPT, it is best to take advantage of problem 
+structure. Dynamic optimization problems are often called online in a control or stateestimation. These problems are very 
+large and have a particular sparse structure. This work investigates the use of parallelization to speed up the NLP solution.
+Because the KKT factorization is the most expensive step in IPOPT, this is the most important step to parallelize. Several
+cyclic reduction algorithms are compared for their performance on generic test matrices as well as matrices of the form found
+ in dynamic optimization. The results show that for very large problems, the KKT matrix factorization time can be improved by
+a factor of four when using eight processors. Mathematical programs with complementarity constraints (MPCCs) are another 
+challenging class of problems for IPOPT. Several algorithmic modifications are examined to specially handle the difficult 
+complementarity constraints. First, two automatic penalty adjustment approaches are implemented and compared. Next, the 
+use of our structured regularization is tested in combination with the equality reformulation of MPCCs. Then, we propose an 
+altered equality reformulation of MPCCs which effectively removes the degenerate equality or inequality constraints. Using
+the MacMPEC test library and two applications, we compare the efficiency of our approaches to previous NLP reformulation strategies.

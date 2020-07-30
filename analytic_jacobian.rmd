@@ -1,0 +1,71 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r functions}
+# functions to get delta and weights -- see the TPC paper
+get_delta <- function(w_h, beta_sk, x_hk){
+  beta_x <- exp(beta_sk %*% t(x_hk))
+  log(w_h / colSums(beta_sk))
+}
+
+get_weights <- function(beta_sk, delta_h, x_hk){
+  # get all weights
+  beta_x <- beta_sk %*% t(x_hk)
+  # add delta to every row of beta_x and transpose
+  beta_xd <- apply(beta_x, 1 , function(m) m + delta_h) 
+  exp(beta_xd)
+}
+
+vi_to_msk <- function(vi){
+  # function to convert a vector of length i to a matrix of dimension s by k
+  matrix(vi, nrow=nrows, byrow=FALSE)
+}
+
+msk_to_vi <- function(msk){
+  # function to convert a vector of length i to a matrix of dimension s by k
+  as.vector(msk)
+}
+
+```
+
+
+
+```{r create_data}
+# create the poisson problem ----
+h <- 6 # number households
+k <- 3 # number characteristics
+s <- 4 # number states
+
+# x_hk is an h x k matrix of characteristics of households
+x_hk <- matrix(seq(2, by=2, length.out=(h * k)), nrow=h, byrow=TRUE)
+x_hk
+
+# beta is an s x k matrix of coefficients
+beta_sk <- matrix(seq(2, 4, length.out=s * k), nrow=s, byrow = TRUE)
+beta_sk
+
+# w_h is a vector of national weights for each household
+w_h <- seq(10, by=2, length.out=h)
+w_h
+
+# delta is an h-length vector of individual constants in the formula for state weights
+delta_h <- get_delta(w_h, beta_sk, x_hk)
+delta_h
+
+# w_h is an h-length vector of individual national weights
+
+w_hs <- get_weights(beta_sk, delta_h, x_hk)
+w_hs
+
+targets <- 
+
+
+```
+
+
+
+

@@ -1,0 +1,9 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+ignore/
+data/
+intermediate/
+*.out
+*.rds
